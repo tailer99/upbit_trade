@@ -1,0 +1,11 @@
+[DANIEL]
+access_key = ACCESS_KEY1 
+secret_key = SECRET_KEY1 
+server_url = https://api.upbit.com
+
+[MARKET]
+major = KRW-BTC 
+favor = KRW-ETH
+except = KRW-STRK
+steady = KRW-ADA
+korean = KRW-IQ
