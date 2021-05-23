@@ -150,7 +150,7 @@ def create_orders(order_query):
                                str(query['price']) + ', ' + str(query['volume']) + ', ' +
                                response.json()['uuid'] + '\n')
     else:
-        # print("error occurred : ", response.status_code)
+        print("error occurred : ", response.json())
         log_file_name = config.trade_log_file_name + datetime.datetime.now().date().strftime('%Y%m%d') + '.log'
         with open(log_file_name, 'a', encoding='utf-8') as logfile:
             logfile.writelines(datetime.datetime.now().strftime('%Y%m%d%H%M%S') + ', ' + query['market'] + ', ' +

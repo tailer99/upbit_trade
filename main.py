@@ -13,7 +13,9 @@ import config
 import time
 import datetime
 import schedule
+import random
 import multiprocessing as mp
+import threading
 
 
 class MyWindow(QMainWindow):
@@ -125,16 +127,25 @@ class MyWindow(QMainWindow):
         self.exceptMarketTable.addAction(remove_except_action)
         remove_except_action.triggered.connect(self.except_remove_market)
 
+        # 매수 종목
+        self.buyTableLabel = QLabel("매수 대상", self)
+        self.buyTableLabel.move(1000, 500)
+        self.buyTable = QTableWidget(0, 1, self)
+        self.buyTable.setGeometry(1000, 530, 130, 130)
+        self.buyTable.horizontalHeader().setVisible(False)  # 열번호 안나오게 하는 코드
+        self.buyTable.setSelectionBehavior(QAbstractItemView.SelectRows)  # Row 단위 선택
+        self.buyTable.setEditTriggers(QAbstractItemView.NoEditTriggers)  # 셀 edit 금지
+        self.buyTable.setContextMenuPolicy(Qt.ActionsContextMenu)
 
-        # 급등 종목
-        self.hotTableLabel = QLabel("급등 종목", self)
-        self.hotTableLabel.move(1000, 500)
-        self.hotTableLabel = QTableWidget(0, 1, self)
-        self.hotTableLabel.setGeometry(1000, 530, 130, 300)
-        self.hotTableLabel.horizontalHeader().setVisible(False)  # 열번호 안나오게 하는 코드
-        self.hotTableLabel.setSelectionBehavior(QAbstractItemView.SelectRows)  # Row 단위 선택
-        self.hotTableLabel.setEditTriggers(QAbstractItemView.NoEditTriggers)  # 셀 edit 금지
-        self.hotTableLabel.setContextMenuPolicy(Qt.ActionsContextMenu)
+        # 매도 종목
+        self.sellTableLabel = QLabel("매도 대상", self)
+        self.sellTableLabel.move(1000, 670)
+        self.sellTable = QTableWidget(0, 1, self)
+        self.sellTable.setGeometry(1000, 700, 130, 130)
+        self.sellTable.horizontalHeader().setVisible(False)  # 열번호 안나오게 하는 코드
+        self.sellTable.setSelectionBehavior(QAbstractItemView.SelectRows)  # Row 단위 선택
+        self.sellTable.setEditTriggers(QAbstractItemView.NoEditTriggers)  # 셀 edit 금지
+        self.sellTable.setContextMenuPolicy(Qt.ActionsContextMenu)
 
         # MarketCap List
         self.marketCapTableLabel = QLabel("마켓 순위", self)
@@ -151,6 +162,10 @@ class MyWindow(QMainWindow):
         self.exitAction.triggered.connect(qApp.quit)
 
         self.searched_user_api_key = []
+        self.watch_market_list = []
+        # Kimchi Coin List
+        self.kimchi_market_list = []
+        self.kimchi_time = False
 
         self.timer_one = QTimer()
         self.timer_one.setInterval(60000)
@@ -167,10 +182,14 @@ class MyWindow(QMainWindow):
         self.toolbar = self.addToolBar('Exit')
         self.toolbar.addAction(self.exitAction)
 
-        # 시작할 때 바로 수
+        # 시작할 때 바로 수행
+        self.init_func()
+
+    # 화면 시작할 때 처리하는 내용
+    def init_func(self):
         self.config_add_favor()
         self.do_time_schedule()
-        # self.chbAutoTrade.setChecked(True)
+        self.chbAutoTrade.setChecked(True)
 
 
     '''
@@ -252,23 +271,44 @@ class MyWindow(QMainWindow):
         if config_file.read(config.ini_file_name, encoding='utf-8'):
             # 해당 USER가 있는지 확인하여 값 셋팅
             if config_file.has_section('MARKET'):
+                # 보유 대상 입력
                 if config_file.has_option('MARKET', 'FAVOR'):
                     favor_market = config_file['MARKET']['FAVOR'].split(',')
                     for market in favor_market:
                         self.favorMarketTable.insertRow(self.favorMarketTable.rowCount())
                         self.favorMarketTable.setItem(self.favorMarketTable.rowCount() -1, 0, QTableWidgetItem(market))
+
+                # 제외 대상 입력
                 if config_file.has_option('MARKET', 'EXCEPT'):
                     except_market = config_file['MARKET']['EXCEPT'].split(',')
                     for market in except_market:
                         self.exceptMarketTable.insertRow(self.exceptMarketTable.rowCount())
                         self.exceptMarketTable.setItem(self.exceptMarketTable.rowCount() -1, 0, QTableWidgetItem(market))
 
+                # 주요 코인 목록 입력
+                for i in range(1, 5):
+                    section = 't' + str(i)
+                    if config_file.has_option('MARKET', section):
+                        major_market = config_file['MARKET'][section].split(',')
+                        for market in major_market:
+                            self.watch_market_list.append(market)
+
+                # 김치 코인 목록 입력
+                for i in range(1, 5):
+                    section = 'kimchi' + str(i)
+                    if config_file.has_option('MARKET', section):
+                        kimchi_market = config_file['MARKET'][section].split(',')
+                        for market in kimchi_market:
+                            self.kimchi_market_list.append(market)
+
+
     def search_account_market(self):
         account_market = []
         for row in range(0, self.accountTable.rowCount()):
             market = self.accountTable.item(row, 5).text() + '-' + self.accountTable.item(row, 0).text()
             # print(row, market)
-            if self.accountTable.item(row, 5).text() != self.accountTable.item(row, 0).text():
+            if self.accountTable.item(row, 5).text() != self.accountTable.item(row, 0).text() and \
+                    self.accountTable.item(row, 0).text() != 'VTHO':
                 account_market.append(market)
         return account_market
 
@@ -278,6 +318,10 @@ class MyWindow(QMainWindow):
         orderbook_list = quotation_func.search_orderbook(orderbook_market)
         price = 0
         position_amount = 0
+
+        if len(orderbook_list) == 0:
+            print(' order book Data Not Found')
+            return
 
         if side_val == 'bid' and hoga_level >= 0:
             # print("check >> ", orderbook_list[1][0], orderbook_list[1][4][hoga_level]['ask_price'],
@@ -414,7 +458,7 @@ class MyWindow(QMainWindow):
         # 거래후 보유 종목 조회
         self.search_account()
 
-    def search(self):
+    def search_market(self):
         result_data = quotation_func.search_market_list()
         self.marketTable.setColumnCount(len(result_data[0]))
         self.marketTable.setRowCount(len(result_data))
@@ -450,6 +494,11 @@ class MyWindow(QMainWindow):
         accounts_res = exchange_func.search_accounts(self.searched_user_api_key)
         for row, acc in enumerate(accounts_res.json()):
             # print('현재 보유 항목 : ', row, '  ', acc)
+
+            # VTHO 는 거래가 안되서 제외함
+            if acc['currency'] == 'VTHO':
+                continue
+
             if row == 0:
                 column_headers = list(acc.keys())
                 column_headers.append('buy amount')
@@ -517,16 +566,9 @@ class MyWindow(QMainWindow):
         # self.accountTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.accountTable.horizontalHeader().setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)
 
+    # 찾은 대상으로 매매 처리
     def trade_coin(self):
-        print(' trade_coin START  ', datetime.datetime.now())
-
-        ticker_market = []
-        # print('trade market ranking : ', config.trade_target_rank10)
-        for row in range(0, config.trade_target_rank10):
-            print(row, self.tickerTable.item(row, 0).text())
-            ticker_market.append(self.tickerTable.item(row, 0).text())
-
-        # print(ticker_market)
+        # print(' trade_coin START  ', datetime.datetime.now())
 
         # 계속 보유할 대상 조회
         favor_market = []
@@ -538,18 +580,22 @@ class MyWindow(QMainWindow):
         for row in range(0, self.exceptMarketTable.rowCount()):
             except_market.append(self.exceptMarketTable.item(row, 0).text())
 
+        # 매수 대상 조회
+        buy_market = []
+        for row in range(0, self.buyTable.rowCount()):
+            buy_market.append(self.buyTable.item(row, 0).text())
+
+        # 매도 대상 조회
+        sell_market = []
+        for row in range(0, self.sellTable.rowCount()):
+            sell_market.append(self.sellTable.item(row, 0).text())
+
         # 보유 종목 조회
         account_market = self.search_account_market()
         # print(account_market)
 
         # 보유종목에서 매도 대상 처리
         for market in account_market:
-            # 당일 시세 순위에 없고 보유대상 종목에 없으면 매도
-            if market not in ticker_market and \
-               market not in favor_market:
-                if market != 'KRW-VTHO':
-                    print(market, '  not found, SELL')
-                    self.sell_coin(market, 'ask', 0, 0, 0)
 
             # 제외 대상 종목에 있으면 매도
             if market in except_market:
@@ -557,23 +603,133 @@ class MyWindow(QMainWindow):
                     print(market, '  except target, SELL')
                     self.sell_coin(market, 'ask', 0, 0, 0)
 
-        # 당일 시세 상위 종목 매수
-        for row in range(0, config.trade_target_rank10):
-            # print(row, self.tickerTable.item(row, 0).text())
-            if self.tickerTable.item(row, 0).text() not in account_market and \
-               self.tickerTable.item(row, 0).text() not in except_market:
-                print(self.tickerTable.item(row, 0).text(), '  not found, BUY')
-                self.buy_coin(self.tickerTable.item(row, 0).text(), 'bid', 0, 0, 0)
+            # 매도 대상에 있는 목록중 보유 대상 종목에 없으면 매도
+            if market in sell_market and \
+                    market not in favor_market:
+                print(market, '  sell target, SELL')
+                self.sell_coin(market, 'ask', 0, 0, 0)
 
         # 보유 대상에 있는 목록중 보유종목에 없으면 매수
         for market in favor_market:
             if market not in account_market:
                 print(market, '  favor target, BUY')
-                self.buy_coin(market, 'ask', 0, 0, 0)
+                self.buy_coin(market, 'bid', 0, 0, 0)
 
-        print(' trade_coin END  ', datetime.datetime.now())
+        # 매도 대상에 있는 목록중 제외 대상 종목에 없으면 매수
+        for market in buy_market:
+            if market not in account_market and \
+                    market not in except_market:
+                print(market, '  buy target, BUY')
+                self.buy_coin(market, 'bid', 0, 0, 0)
+
+        # print(' trade_coin END  ', datetime.datetime.now())
 
 
+    # 찾은 대상으로 매매 처리
+    def buy_kimchi_coin(self):
+        # print(' buy_kimchi_coin START  ', datetime.datetime.now())
+
+        # 계속 보유할 대상 조회
+        favor_market = []
+        for row in range(0, self.favorMarketTable.rowCount()):
+            favor_market.append(self.favorMarketTable.item(row, 0).text())
+
+        # 보유하지 않을 대상 조회
+        except_market = []
+        for row in range(0, self.exceptMarketTable.rowCount()):
+            except_market.append(self.exceptMarketTable.item(row, 0).text())
+
+        # 매수 대상 조회
+        buy_market = []
+        for row in range(0, self.buyTable.rowCount()):
+            buy_market.append(self.buyTable.item(row, 0).text())
+
+        # 매도 대상 조회
+        sell_market = []
+        for row in range(0, self.sellTable.rowCount()):
+            sell_market.append(self.sellTable.item(row, 0).text())
+
+        # 보유 종목 조회
+        account_market = self.search_account_market()
+        # print(account_market)
+
+
+        # 보유 대상에 있는 목록중 보유종목에 없으면 매수
+        # print(self.kimchi_market_list)
+        for market in self.kimchi_market_list:
+            if market not in account_market and \
+                    market not in except_market and \
+                    market not in sell_market:
+
+                # 시간봉 기준으로 30시간 이내에 상승한 적 없는 건 우선순위 부여
+                candle_1h = quotation_func.search_candle_chart(market, "minutes", 60, 30)
+                for candle in candle_1h[1:]:
+                    if (float(candle[6]) - float(candle[3])) / float(candle[3]) >= 0.2:
+                        # print('Already Up')
+                        up_yn = 1
+                        break
+
+                if up_yn == 1:
+                    add_rate = 1.5
+                else:
+                    add_rate = 1
+
+                # 랜덤으로 대상 선정
+                buy_rate = random.random()
+                # print('random :', buy_rate, ' , add_rate : ', add_rate)
+
+                buy_rate = buy_rate * add_rate
+                if buy_rate >= 0.7:
+                    print(market, '  kimchi target, BUY')
+                    self.buy_coin(market, 'bid', 0, 0, 0)
+
+            time.sleep(0.2)
+
+        # print(' buy_kimchi_coin END  ', datetime.datetime.now())
+
+    # 찾은 대상으로 매매 처리
+    def sell_kimchi_coin(self):
+        # print(' sell_kimchi_coin START  ', datetime.datetime.now())
+
+        # 계속 보유할 대상 조회
+        favor_market = []
+        for row in range(0, self.favorMarketTable.rowCount()):
+            favor_market.append(self.favorMarketTable.item(row, 0).text())
+
+        # 보유하지 않을 대상 조회
+        except_market = []
+        for row in range(0, self.exceptMarketTable.rowCount()):
+            except_market.append(self.exceptMarketTable.item(row, 0).text())
+
+        # 매수 대상 조회
+        buy_market = []
+        for row in range(0, self.buyTable.rowCount()):
+            buy_market.append(self.buyTable.item(row, 0).text())
+
+        # 매도 대상 조회
+        sell_market = []
+        for row in range(0, self.sellTable.rowCount()):
+            sell_market.append(self.sellTable.item(row, 0).text())
+
+        # 보유 종목 조회
+        account_market = self.search_account_market()
+        # print(account_market)
+
+        # 보유종목에서 매도 대상 처리
+        for market in account_market:
+
+            # 매도 대상에 있는 목록중 보유 대상 종목에 없으면 매도
+            if market in self.kimchi_market_list and \
+                    market not in favor_market and \
+                    market not in buy_market:
+                print(market, '  kimchi target, SELL')
+                self.sell_coin(market, 'ask', 0, 0, 0)
+
+            time.sleep(0.2)
+
+        # print(' sell_kimchi_coin END  ', datetime.datetime.now())
+
+    # 당일 시세 조회
     def search_today_ticker(self):
         result_data = quotation_func.search_market_list()
         # print(result_data)
@@ -609,15 +765,6 @@ class MyWindow(QMainWindow):
                 item.setTextAlignment(Qt.AlignVCenter | Qt.AlignCenter)
                 self.tickerTable.setItem(row, col, item)
 
-                # self.tickerTable.setItem(row, col, QTableWidgetItem(str(val)))
-
-                # print(self.tickerTable.item(row, col).ItemType)
-
-        # self.tickerTable.resizeColumnsToContents()
-        # self.tickerTable.resizeRowsToContents()
-
-        # self.tickerTable.setItem(3, 1, QTableWidgetItem(day_ticker_result[1][6]))
-
     # 순위 내의 수익률 계산
     def calc_profit(self, rank):
 
@@ -644,7 +791,7 @@ class MyWindow(QMainWindow):
     def calc_top_item_profit(self):
 
         self.txtProfit10.setText(str(self.calc_profit(10)))
-        self.txtProfit20.setText(str(self.calc_profit(20)))
+        self.txtProfit20.setText(str(self.calc_profit(50)))
 
     def search_market_list(self):
         # print("#############  market list   ###########")
@@ -696,13 +843,12 @@ class MyWindow(QMainWindow):
 
         # 찾은 대상으로 주문하기
         for market in sell_target:
-            # random 으로 값이 1인 경우에만 매수
             self.sell_coin(market, 'ask', 0, 0, 0)
             time.sleep(0.5)
 
     # 거래량 급등하는 종목 선정
     def buy_trade_volume_increase(self):
-        print(' buy_trade_volume_increase START  ', datetime.datetime.now())
+        # print(' buy_trade_volume_increase START  ', datetime.datetime.now())
         ticks_target = []
 
         trade_market_list = quotation_func.search_market_list()
@@ -712,57 +858,141 @@ class MyWindow(QMainWindow):
             order, day_market = quotation_func.search_ticks(market[1], 300)
             if day_market != 'X':
                 ticks_target.append([order, day_market])
-            time.sleep(0.05)
+            time.sleep(0.3)
 
         # 순간 체결량이 많은 순서로 정렬
         ticks_target.sort()
         cur_time = datetime.datetime.now().strftime('%Y%m%d %H:%M:%s')
-        print(cur_time, ' : ticks_target all : ', ticks_target)
+        if len(ticks_target) > 0:
+            print(cur_time, ' : ticks_target all : ', ticks_target)
 
         # 찾은 대상으로 주문하기
+        for target in ticks_target:
 
-        for order, market in ticks_target:
+            market = target[1]
+            print('aa', target, '  xx ', market)
             item = QTableWidgetItem(market)
             item.setTextAlignment(Qt.AlignVCenter | Qt.AlignRight)
-            row = self.hotTableLabel.insertRow()
-            self.hotTableLabel.setItem(row, 0, item)
-            self.hotTableLabel.setItem(row, 1, QTableWidgetItem(cur_time))
+            self.buyTable.setItem(self.buyTable.rowCount(), 0, item)
+            self.buyTable.setItem(self.buyTable.rowCount(), 1, QTableWidgetItem(cur_time))
 
-        print(' buy_trade_volume_increase END  ', datetime.datetime.now())
+        # 거래량과 1분봉 기준 상승주 조회
+        buy_list = quotation_func.find_buy_target_by_amount(trade_market_list[:50])
+        for market in buy_list:
+            item = QTableWidgetItem(market)
+            item.setTextAlignment(Qt.AlignVCenter | Qt.AlignRight)
+            self.buyTable.setItem(self.buyTable.rowCount(), 0, item)
+            self.buyTable.setItem(self.buyTable.rowCount(), 1, QTableWidgetItem(cur_time))
+
+        # print(' buy_trade_volume_increase END  ', datetime.datetime.now())
+
+    # 24시간이내 최고가에서 하락하는 종목 선정
+    def sell_high_coin(self):
+        # print(time.strftime('%Y%m%d %H%M%s'), ' : sell_high_coin start')
+        # 거래량으로 매도 대상 찾기
+        sell_target = quotation_func.find_sell_high_target()
+        # print(sell_target)
+
+        # 계속 보유할 대상 조회
+        favor_market = []
+        for row in range(0, self.favorMarketTable.rowCount()):
+            favor_market.append(self.favorMarketTable.item(row, 0).text())
+
+        cur_time = datetime.datetime.now().strftime('%Y%m%d %H:%M:%s')
+        if len(sell_target) > 0:
+            print(cur_time, ' : sell_target all : ', sell_target)
+
+        # 찾은 대상으로 주문하기
+        for market in sell_target:
+            if market not in favor_market:
+                # self.sell_coin(market, 'ask', 0, 0, 0)
+                item = QTableWidgetItem(market)
+                item.setTextAlignment(Qt.AlignVCenter | Qt.AlignRight)
+                self.sellTable.setItem(self.sellTable.rowCount(), 0, item)
+                self.sellTable.setItem(self.sellTable.rowCount(), 1, QTableWidgetItem(cur_time))
+
+            time.sleep(0.5)
+
+    def watch_market(self):
+
+        # print('monitor : ', self.watch_market_list)
+        for market in self.watch_market_list:
+            if market == 'KRW-BTC':
+                quotation_func.watching_market(market, 0.003, 0.01)
+            elif market == 'KRW-ETC':
+                quotation_func.watching_market(market, 0.006, 0.02)
+            else:
+                quotation_func.watching_market(market, 0.01, 0.03)
+
+            time.sleep(0.5)
 
     def do_time_schedule(self):
+        # print(' do_time_schedule  START ')
         self.search_today_ticker()
         self.search_account()
 
         cur_datetime = datetime.datetime.now()
         cur_weekday = cur_datetime.weekday()
         cur_time = cur_datetime.strftime('%H:%M')
+        cur_minute = cur_datetime.strftime('%M')
 
         if cur_weekday == 6 and cur_time <= '08:30':
             print('일요일 오전 쉬기 ')
             pass
         elif cur_weekday == 5 and cur_time == '11:55':
             print('일요일 오전 쉬기, 모두 팔아버림')
-            self.acc_sell_coin()
+            self.sell_all_coin()
 
         elif cur_time == '08:58':
+
+            self.kimchi_time = True
             print('시간 : ', cur_time)
-            self.acc_sell_coin()
-            print('처리 확인')
-            # self.buy_kimchi_coin()
+            self.sell_all_coin()
+            self.buy_kimchi_coin()
 
         elif cur_time == '09:10':
+
             print('김치코인 정리')
-            # self.sell_kimchi_coin()
+            self.sell_kimchi_coin()
+            self.kimchi_time = False
+
+        # elif cur_minute in ('15', '35'):
+        #
+        #     self.kimchi_time = True
+        #     print('시간 2: ', cur_time)
+        #     self.sell_all_coin()
+        #     self.buy_kimchi_coin()
+        #
+        # elif cur_minute in ('25', '45'):
+        #
+        #     print('김치코인 정리2')
+        #     self.sell_kimchi_coin()
+        #     self.kimchi_time = False
 
         elif self.chbAutoTrade.isChecked():
-            self.trade_coin()
 
-            p = mp.Process(name='trade_by_volume', target=self.buy_trade_volume_increase)
-            p.start()
+            if self.kimchi_time:
+                print(' 김치 타임 쉬기 ')
+            else:
+                # self.trade_coin()
 
-        # else:
-        #     print(cur_time)
+                # 매수 대상 찾기 1
+                p_buy1 = mp.Process(name='trade_by_volume', target=self.buy_trade_volume_increase)
+                p_buy1.start()
+                # self.buy_trade_volume_increase()
+
+                # 매도 대상 찾기 1
+                p_sell1 = mp.Process(name='sell_high_coin', target=self.sell_high_coin)
+                p_sell1.start()
+                # self.sell_high_coin()
+
+        # 시장 감시
+        p_watch1 = mp.Process(name='watch_market', target=self.watch_market)
+        p_watch1.start()
+
+
+# TODO
+#   코인마켓캡에서 순위 가져오기, binance 에서 제공할 수도 있음
 
 
     # API 접속키 추가
@@ -801,11 +1031,14 @@ class MyWindow(QMainWindow):
 
 
 if __name__ == '__main__':
+    mp.freeze_support()
+
     app = QApplication(sys.argv)
     window = MyWindow()
     window.setGeometry(10, 10, 1200, 800)
 
     # window.show()
     window.showFullScreen()
+
     sys.exit(app.exec_())
 
